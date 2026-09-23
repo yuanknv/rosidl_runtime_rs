@@ -363,35 +363,6 @@ mod tests {
         assert!(BoundedVec::<u8, 2>::try_from(vec![1, 2, 3]).is_err());
     }
 
-    #[test]
-    fn oversized_sequence_allocation_is_rejected() {
-        assert!(PrimitiveSequence::<u64>::try_new(usize::MAX).is_err());
-    }
-
-    #[test]
-    fn legacy_cpu_sequences_keep_the_three_field_layout() {
-        use crate::{BoundedSequence, Sequence};
-        assert_eq!(
-            std::mem::size_of::<Sequence<u8>>(),
-            3 * std::mem::size_of::<usize>()
-        );
-        assert_eq!(
-            std::mem::size_of::<BoundedSequence<u8, 4>>(),
-            std::mem::size_of::<Sequence<u8>>()
-        );
-        let mut values = Sequence::<bool>::new(2);
-        assert_eq!(values.as_slice(), &[false, false]);
-        values[0] = true;
-        values.extend([true]);
-        assert_eq!(values.clone().as_slice(), &[true, false, true]);
-        assert_eq!(
-            values.into_iter().collect::<Vec<_>>(),
-            vec![true, false, true]
-        );
-        let bounded: BoundedSequence<u8, 4> = vec![1, 2].try_into().unwrap();
-        assert_eq!(bounded.as_slice(), &[1, 2]);
-    }
-
     #[cfg(feature = "serde")]
     #[test]
     fn serde_preserves_host_values_and_checks_bounds() {

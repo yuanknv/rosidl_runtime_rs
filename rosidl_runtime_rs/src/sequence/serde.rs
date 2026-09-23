@@ -67,11 +67,7 @@ impl<T: Serialize + PrimitiveSequenceAlloc> Serialize for PrimitiveSequence<T> {
                 "opaque buffers cannot be serialized as CPU sequences",
             ));
         }
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for element in self.iter() {
-            seq.serialize_element(element)?;
-        }
-        seq.end()
+        self.as_slice().serialize(serializer)
     }
 }
 

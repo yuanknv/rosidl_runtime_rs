@@ -1189,12 +1189,6 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_sequence() {
-        assert!(PrimitiveSequence::<i32>::default().is_empty());
-        assert!(BoundedPrimitiveSequence::<i32, 5>::default().is_empty());
-    }
-
-    #[test]
     fn test_sequence_layouts() {
         let primitive_fields_size =
             std::mem::size_of::<*mut u8>() + 2 * std::mem::size_of::<usize>() + 2;
@@ -1208,22 +1202,16 @@ mod tests {
             std::mem::size_of::<BoundedPrimitiveSequence<u8, 4>>(),
             expected_primitive_size
         );
-        assert_eq!(
+        for size in [
             std::mem::size_of::<Sequence<crate::String>>(),
-            std::mem::size_of::<*mut crate::String>() + 2 * std::mem::size_of::<usize>()
-        );
-    }
-
-    #[test]
-    fn test_buffer_sequence_rejects_slice_access() {
-        let seq = std::mem::ManuallyDrop::new(PrimitiveSequence::<u8> {
-            data: std::ptr::null_mut(),
-            size: 0,
-            capacity: 0,
-            is_rosidl_buffer: true,
-            owns_rosidl_buffer: false,
-        });
-        assert!(std::panic::catch_unwind(|| seq.as_slice()).is_err());
+            std::mem::size_of::<Sequence<u8>>(),
+            std::mem::size_of::<BoundedSequence<u8, 4>>(),
+        ] {
+            assert_eq!(
+                size,
+                std::mem::size_of::<*mut u8>() + 2 * std::mem::size_of::<usize>()
+            );
+        }
     }
 
     quickcheck! {
@@ -1253,24 +1241,18 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_into_vec_primitive_roundtrip() {
-        let xs: Vec<i32> = (0..1024).collect();
-        let seq: PrimitiveSequence<i32> = PrimitiveSequence::from(&xs[..]);
-        let ys: Vec<i32> = seq.into();
-        assert_eq!(xs, ys);
-    }
-
     quickcheck! {
-        fn test_into_vec_primitive_quickcheck(xs: Vec<u8>) -> bool {
-            let seq: PrimitiveSequence<u8> = PrimitiveSequence::from(&xs[..]);
-            let ys: Vec<u8> = seq.into();
+        fn test_into_vec_primitive_quickcheck(xs: Vec<i32>) -> bool {
+            let seq: PrimitiveSequence<i32> = PrimitiveSequence::from(&xs[..]);
+            let ys: Vec<i32> = seq.into();
             xs == ys
         }
     }
 
     #[test]
     fn empty_primitive_sequences_collect_clone_and_extend() {
+        assert!(PrimitiveSequence::<i32>::default().is_empty());
+        assert!(BoundedPrimitiveSequence::<i32, 5>::default().is_empty());
         let mut sequence: PrimitiveSequence<u32> = std::iter::empty().collect();
         assert!(sequence.clone().is_empty());
         sequence.extend([7, 11]);
@@ -1281,6 +1263,7 @@ mod tests {
 
     #[test]
     fn failed_initialization_preserves_existing_elements() {
+        assert!(PrimitiveSequence::<u64>::try_new(usize::MAX).is_err());
         let mut sequence = PrimitiveSequence::from(&[17u64, 23][..]);
         assert!(!u64::primitive_sequence_init(&mut sequence, usize::MAX));
         assert_eq!(sequence.as_slice(), &[17, 23]);
@@ -1313,6 +1296,21 @@ mod tests {
     }
 
     #[test]
+    fn legacy_cpu_sequences_preserve_values() {
+        let mut values = Sequence::<bool>::new(2);
+        assert_eq!(values.as_slice(), &[false, false]);
+        values[0] = true;
+        values.extend([true]);
+        assert_eq!(values.clone().as_slice(), &[true, false, true]);
+        assert_eq!(
+            values.into_iter().collect::<Vec<_>>(),
+            vec![true, false, true]
+        );
+        let bounded: BoundedSequence<u8, 4> = vec![1, 2].try_into().unwrap();
+        assert_eq!(bounded.as_slice(), &[1, 2]);
+    }
+
+    #[test]
     fn primitive_types_initialize_copy_and_compare() {
         macro_rules! check {
             ($($ty:ty),+ $(,)?) => {$(
@@ -1337,6 +1335,7 @@ mod tests {
             owns_rosidl_buffer: false,
         };
         assert!(format!("{sequence:?}").contains("owned: false"));
+        assert!(std::panic::catch_unwind(|| sequence.as_slice()).is_err());
         assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             sequence.as_mut_slice();
         }))

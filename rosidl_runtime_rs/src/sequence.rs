@@ -501,7 +501,7 @@ pub struct PrimitiveSequence<T: PrimitiveSequenceAlloc> {
 }
 
 /// A bounded primitive sequence.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct BoundedPrimitiveSequence<T: PrimitiveSequenceAlloc, const N: usize> {
     inner: PrimitiveSequence<T>,
@@ -901,36 +901,6 @@ impl<T: PrimitiveSequenceAlloc, const N: usize> IntoIterator for BoundedPrimitiv
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.into_iter()
-    }
-}
-
-impl<T: PrimitiveSequenceAlloc + PartialEq, const N: usize> PartialEq
-    for BoundedPrimitiveSequence<T, N>
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl<T: PrimitiveSequenceAlloc + Eq, const N: usize> Eq for BoundedPrimitiveSequence<T, N> {}
-
-impl<T: PrimitiveSequenceAlloc + PartialOrd, const N: usize> PartialOrd
-    for BoundedPrimitiveSequence<T, N>
-{
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.inner.partial_cmp(&other.inner)
-    }
-}
-
-impl<T: PrimitiveSequenceAlloc + Ord, const N: usize> Ord for BoundedPrimitiveSequence<T, N> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.inner.cmp(&other.inner)
-    }
-}
-
-impl<T: PrimitiveSequenceAlloc + Hash, const N: usize> Hash for BoundedPrimitiveSequence<T, N> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.inner.hash(state);
     }
 }
 

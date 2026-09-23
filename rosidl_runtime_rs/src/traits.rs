@@ -30,9 +30,7 @@ pub trait SequenceAlloc: Sized {
     fn sequence_copy(in_seq: &crate::Sequence<Self>, out_seq: &mut crate::Sequence<Self>) -> bool;
 }
 
-/// Internal trait connecting primitive sequences to `rosidl_runtime_c` allocation functions.
-///
-/// User code does not need to call or implement this trait.
+/// Primitive sequence allocation, copying, and equality through `rosidl_runtime_c`.
 pub trait PrimitiveSequenceAlloc: Copy + Sized {
     /// Wraps the corresponding primitive sequence init function.
     fn primitive_sequence_init(seq: &mut crate::PrimitiveSequence<Self>, size: usize) -> bool;
@@ -42,6 +40,20 @@ pub trait PrimitiveSequenceAlloc: Copy + Sized {
     fn primitive_sequence_copy(
         in_seq: &crate::PrimitiveSequence<Self>,
         out_seq: &mut crate::PrimitiveSequence<Self>,
+    ) -> bool;
+    /// Copies sequence contents to CPU memory.
+    fn primitive_sequence_to_vec(
+        seq: &crate::PrimitiveSequence<Self>,
+    ) -> Result<Vec<Self>, crate::BufferError> {
+        if seq.is_rosidl_buffer() {
+            return Err(crate::BufferError::UnsupportedElement);
+        }
+        Ok(seq.as_slice().to_vec())
+    }
+    /// Compares CPU or Buffer-backed sequence contents.
+    fn primitive_sequence_are_equal(
+        lhs: &crate::PrimitiveSequence<Self>,
+        rhs: &crate::PrimitiveSequence<Self>,
     ) -> bool;
 }
 
@@ -55,15 +67,26 @@ pub trait RmwMessage: Clone + Debug + Default + Send + Sync + Message {
     /// A string representation of this message's type, e.g. "geometry_msgs/msg/Twist"
     const TYPE_NAME: &'static str;
 
+    /// Materializes accelerator fields into ordinary CPU sequences recursively.
+    fn try_into_cpu(self) -> Result<Self, crate::BufferError> {
+        Ok(self)
+    }
+
     /// Get a pointer to the correct `rosidl_message_type_support_t` structure.
     fn get_type_support() -> *const std::ffi::c_void;
 }
 
 /// Trait for types that can be used in a `rclrs::Subscription` and a `rclrs::Publisher`.
 ///
-/// `rosidl_generator_rs` generates two types of messages that implement this trait:
-/// - An "idiomatic" message type, in the `${package_name}::msg` module
-/// - An "RMW-native" message type, in the `${package_name}::msg::rmw` module
+/// `rosidl_generator_rs` generates three representations of each ROS message:
+/// - CPU messages in `${package_name}::msg`.
+/// - Backend-neutral messages in `${package_name}::msg::buffer`.
+/// - Native transport messages in `${package_name}::msg::rmw`.
+///
+/// All representations share the same [`Self::RmwMsg`] and ROS type support.
+/// Buffer messages use [`crate::Buffer`] for primitive sequences and can retain
+/// accelerator storage. [`Self::try_from_rmw_message`] reports host-copy errors
+/// when a CPU representation receives accelerator storage.
 ///
 /// # Idiomatic message type
 /// The idiomatic message type aims to be familiar to Rust developers and ROS 2 developers coming
@@ -162,6 +185,11 @@ pub trait Message: Clone + Debug + Default + 'static + Send + Sync {
 
     /// Converts the RMW-native message into an idiomatic message.
     fn from_rmw_message(msg: Self::RmwMsg) -> Self;
+
+    /// Converts a received message, reporting backend transfer failures.
+    fn try_from_rmw_message(msg: Self::RmwMsg) -> Result<Self, crate::BufferError> {
+        Ok(Self::from_rmw_message(msg))
+    }
 }
 
 /// Trait for services.

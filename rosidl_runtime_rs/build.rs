@@ -22,12 +22,23 @@ fn main() {
     #[cfg(not(feature = "use_ros_shim"))]
     {
         let ament_prefix_path_list = get_env_var_or_abort(AMENT_PREFIX_PATH);
-        for ament_prefix_path in ament_prefix_path_list.split(':') {
-            let library_path = Path::new(ament_prefix_path).join("lib");
+        for library in ["rosidl_runtime_c", "rosidl_buffer"] {
+            let library_path = env::split_paths(&ament_prefix_path_list)
+                .map(|prefix| Path::new(&prefix).join("lib"))
+                .find(|directory| {
+                    [
+                        format!("lib{library}.so"),
+                        format!("lib{library}.dylib"),
+                        format!("{library}.lib"),
+                    ]
+                    .iter()
+                    .any(|name| directory.join(name).is_file())
+                })
+                .unwrap_or_else(|| panic!("{library} is missing from AMENT_PREFIX_PATH"));
             println!("cargo:rustc-link-search=native={}", library_path.display());
         }
     }
 
-    // Invalidate the built crate whenever this script changes
+    println!("cargo:rerun-if-env-changed=AMENT_PREFIX_PATH");
     println!("cargo:rerun-if-changed=build.rs");
 }

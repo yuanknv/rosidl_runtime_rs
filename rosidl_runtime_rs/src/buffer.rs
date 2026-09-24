@@ -73,6 +73,13 @@ pub(crate) fn copy_to_host(pointer: *const c_void, len: usize) -> Result<Vec<u8>
 ///
 /// `as_slice` exposes contiguous CPU storage. `to_vec` copies any supported
 /// backend to the host. Native accelerator storage is supported for `u8`.
+///
+/// ```
+/// use rosidl_runtime_rs::Buffer;
+///
+/// let data = Buffer::from(vec![1u8, 2, 3]);
+/// assert_eq!(data.as_slice(), Some(&[1, 2, 3][..]));
+/// ```
 #[derive(Clone, Default, PartialEq)]
 pub struct Buffer<T: PrimitiveSequenceAlloc> {
     sequence: PrimitiveSequence<T>,

@@ -1154,18 +1154,19 @@ impl<T: PrimitiveSequenceAlloc, const N: usize> BoundedPrimitiveSequence<T, N> {
 ///
 /// # Example
 /// ```
-/// # use rosidl_runtime_rs::{BoundedPrimitiveSequence, PrimitiveSequence, seq};
-/// let unbounded: PrimitiveSequence<i32> = seq![1, 2, 3];
-/// let bounded: BoundedPrimitiveSequence<i32, 5> = seq![5 # 1, 2, 3];
+/// # use rosidl_runtime_rs::seq;
+/// let unbounded = seq![1, 2, 3];
+/// let bounded = seq![5 # 1, 2, 3];
 /// assert_eq!(&unbounded[..], &bounded[..])
 /// ```
 #[macro_export]
 macro_rules! seq {
     [$( $elem:expr ),*] => {
-        vec![$($elem),*].into()
+        $crate::Sequence::from(::std::vec![$($elem),*])
     };
     [$len:literal # $( $elem:expr ),*] => {
-        ::std::convert::TryInto::try_into(vec![$($elem),*]).unwrap()
+        <$crate::BoundedSequence<_, $len> as ::std::convert::TryFrom<_>>::try_from(::std::vec![$($elem),*])
+            .expect("sequence exceeds its declared bound")
     };
 }
 
@@ -1186,6 +1187,28 @@ mod tests {
             let len = u8::arbitrary(g);
             (0..len).map(|_| T::arbitrary(g)).collect()
         }
+    }
+
+    #[test]
+    fn seq_macro_infers_cpu_sequence_types() {
+        let unbounded = crate::seq![1u8, 2];
+        assert_eq!(unbounded.len(), 2);
+        let _: Sequence<u8> = unbounded;
+
+        let bounded = crate::seq![3 # 1u8, 2];
+        assert_eq!(bounded.as_slice(), &[1, 2]);
+        let _: BoundedSequence<u8, 3> = bounded;
+
+        let empty: Sequence<u8> = crate::seq![];
+        assert!(empty.is_empty());
+        let empty_bounded: BoundedSequence<u8, 0> = crate::seq![0 #];
+        assert!(empty_bounded.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "sequence exceeds its declared bound")]
+    fn seq_macro_rejects_values_above_its_declared_bound() {
+        let _ = crate::seq![1 # 10u8, 20];
     }
 
     #[test]

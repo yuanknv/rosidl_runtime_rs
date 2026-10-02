@@ -1,6 +1,7 @@
 [package]
 name = "rosidl_runtime_rs"
 version = "0.6.0"
+# This project is not military-sponsored, Jacob's employment contract just requires him to use this email address
 authors = ["Esteve Fernandez <esteve@apache.org>", "Nikolai Morin <nnmmgit@gmail.com>", "Jacob Hassold <jacob.a.hassold.civ@army.mil>"]
 edition = "2021"
 license = "Apache-2.0"
@@ -14,6 +15,7 @@ serde = { version = "1", optional = true }
 
 [features]
 default = []
+# Only for building documentation on docs.rs without a ROS installation.
 use_ros_shim = []
 
 [dev-dependencies]

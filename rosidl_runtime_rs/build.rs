@@ -40,5 +40,6 @@ fn main() {
     }
 
     println!("cargo:rerun-if-env-changed=AMENT_PREFIX_PATH");
+    // Invalidate the built crate whenever this script changes
     println!("cargo:rerun-if-changed=build.rs");
 }

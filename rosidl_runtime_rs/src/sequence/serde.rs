@@ -98,10 +98,10 @@ impl<T: Serialize + PrimitiveSequenceAlloc, const N: usize> Serialize
 mod tests {
     use quickcheck::quickcheck;
 
-    use crate::{BoundedPrimitiveSequence, PrimitiveSequence};
+    use crate::{BoundedPrimitiveSequence, BoundedSequence, PrimitiveSequence, Sequence};
 
     quickcheck! {
-        fn test_json_roundtrip_sequence(xs: PrimitiveSequence<i32>) -> bool {
+        fn test_json_roundtrip_sequence(xs: Sequence<i32>) -> bool {
             let value = serde_json::to_value(xs.clone()).unwrap();
             let recovered = serde_json::from_value(value).unwrap();
             xs == recovered
@@ -109,7 +109,22 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_json_roundtrip_bounded_sequence(xs: BoundedPrimitiveSequence<i32, 256>) -> bool {
+        fn test_json_roundtrip_bounded_sequence(xs: BoundedSequence<i32, 256>) -> bool {
+            let value = serde_json::to_value(xs.clone()).unwrap();
+            let recovered = serde_json::from_value(value).unwrap();
+            xs == recovered
+        }
+    }
+    quickcheck! {
+        fn test_json_roundtrip_primitive_sequence(xs: PrimitiveSequence<i32>) -> bool {
+            let value = serde_json::to_value(xs.clone()).unwrap();
+            let recovered = serde_json::from_value(value).unwrap();
+            xs == recovered
+        }
+    }
+
+    quickcheck! {
+        fn test_json_roundtrip_bounded_primitive_sequence(xs: BoundedPrimitiveSequence<i32, 256>) -> bool {
             let value = serde_json::to_value(xs.clone()).unwrap();
             let recovered = serde_json::from_value(value).unwrap();
             xs == recovered

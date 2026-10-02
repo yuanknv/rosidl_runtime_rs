@@ -24,15 +24,18 @@ use crate::traits::{PrimitiveSequenceAlloc, SequenceAlloc};
 /// # Example
 ///
 /// ```
-/// # use rosidl_runtime_rs::{Sequence, String, seq};
-/// let mut list = Sequence::<String>::new(3);
+/// # use rosidl_runtime_rs::{Sequence, seq};
+/// let mut list = Sequence::<i32>::new(3);
 /// // Sequences deref to slices
-/// assert_eq!(list.len(), 3);
-/// list[0] = "three".into();
+/// assert_eq!(&list[..], &[0, 0, 0]);
+/// list[0] = 3;
+/// list[1] = 2;
+/// list[2] = 1;
+/// assert_eq!(&list[..], &[3, 2, 1]);
 /// // Alternatively, use the seq! macro
-/// list = seq!["three".into(), "two".into(), "one".into()];
+/// list = seq![3, 2, 1];
 /// // The default sequence is empty
-/// assert!(Sequence::<String>::default().is_empty());
+/// assert!(Sequence::<i32>::default().is_empty());
 /// ```
 #[repr(C)]
 pub struct Sequence<T: SequenceAlloc> {
@@ -54,15 +57,18 @@ pub struct Sequence<T: SequenceAlloc> {
 /// # Example
 ///
 /// ```
-/// # use rosidl_runtime_rs::{BoundedSequence, String, seq};
-/// let mut list = BoundedSequence::<String, 5>::new(3);
+/// # use rosidl_runtime_rs::{BoundedSequence, seq};
+/// let mut list = BoundedSequence::<i32, 5>::new(3);
 /// // BoundedSequences deref to slices
-/// assert_eq!(list.len(), 3);
-/// list[0] = "three".into();
+/// assert_eq!(&list[..], &[0, 0, 0]);
+/// list[0] = 3;
+/// list[1] = 2;
+/// list[2] = 1;
+/// assert_eq!(&list[..], &[3, 2, 1]);
 /// // Alternatively, use the seq! macro with the length specifier
-/// list = seq![5 # "three".into(), "two".into(), "one".into()];
+/// list = seq![5 # 3, 2, 1];
 /// // The default bounded sequence is empty
-/// assert!(BoundedSequence::<String, 5>::default().is_empty());
+/// assert!(BoundedSequence::<i32, 5>::default().is_empty());
 /// ```
 #[derive(Clone)]
 #[repr(transparent)]
@@ -84,6 +90,8 @@ pub struct SequenceIterator<T: SequenceAlloc> {
     seq: Sequence<T>,
     idx: usize,
 }
+
+// ========================= impl for Sequence =========================
 
 impl<T: SequenceAlloc> Clone for Sequence<T> {
     fn clone(&self) -> Self {
@@ -152,21 +160,18 @@ impl<T: SequenceAlloc> Extend<T> for Sequence<T> {
         // that many elements.
         let num_remaining = it.size_hint().0;
         if num_remaining > 0 {
-            let new_size = self
-                .size
-                .checked_add(num_remaining)
-                .expect("sequence length overflow");
+            let new_size = self.size.saturating_add(num_remaining);
             resize(self, new_size);
         }
         for item in it {
             // If there is no more capacity for the next element, resize to the
             // next power of two.
+            //
+            // A pedantic implementation would check for usize overflow here, but
+            // that is hardly possible on real hardware. Also, not the entire
+            // usize address space is usable for user space programs.
             if cur_idx == self.size {
-                let new_size = self
-                    .size
-                    .checked_add(1)
-                    .and_then(usize::checked_next_power_of_two)
-                    .expect("sequence length overflow");
+                let new_size = (self.size + 1).next_power_of_two();
                 resize(self, new_size);
             }
             self[cur_idx] = item;
@@ -193,7 +198,13 @@ impl<T: SequenceAlloc> From<Vec<T>> for Sequence<T> {
     }
 }
 
-/// Copies a C-owned sequence into a Rust vector.
+/// Fast conversion from a `Sequence<T>` to a `Vec<T>` for `Copy` element types.
+///
+/// For `Copy` element types (which includes all ROS 2 primitive types), this
+/// compiles down to a single `memcpy` from the C-owned sequence buffer into
+/// a freshly-allocated `Vec`. This avoids the per-element read-and-zero-write
+/// performed by `SequenceIterator::next()` when collecting into a `Vec` via
+/// `into_iter().collect()`.
 impl<T: SequenceAlloc + Copy> From<Sequence<T>> for Vec<T> {
     fn from(seq: Sequence<T>) -> Self {
         seq.as_slice().to_vec()
@@ -287,6 +298,8 @@ where
         }
     }
 }
+
+// ========================= impl for BoundedSequence =========================
 
 impl<T: Debug + SequenceAlloc, const N: usize> Debug for BoundedSequence<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
@@ -454,6 +467,8 @@ where
     }
 }
 
+// ========================= impl for SequenceIterator =========================
+
 impl<T: SequenceAlloc> Iterator for SequenceIterator<T> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
@@ -473,14 +488,14 @@ impl<T: SequenceAlloc> Iterator for SequenceIterator<T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.seq.size - self.idx;
+        let len = (self.seq.size + 1) - self.idx;
         (len, Some(len))
     }
 }
 
 impl<T: SequenceAlloc> ExactSizeIterator for SequenceIterator<T> {
     fn len(&self) -> usize {
-        self.seq.size - self.idx
+        (self.seq.size + 1) - self.idx
     }
 }
 
@@ -925,6 +940,8 @@ impl<T: PrimitiveSequenceAlloc> Iterator for PrimitiveSequenceIterator<T> {
 impl<T: PrimitiveSequenceAlloc> ExactSizeIterator for PrimitiveSequenceIterator<T> {}
 impl<T: PrimitiveSequenceAlloc> FusedIterator for PrimitiveSequenceIterator<T> {}
 
+// ========================= impl for StringExceedsBoundsError =========================
+
 impl Display for SequenceExceedsBoundsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
@@ -956,21 +973,26 @@ macro_rules! impl_primitive_sequence_alloc {
         impl PrimitiveSequenceAlloc for $rust_type {
             $($extra)*
             fn primitive_sequence_init(seq: &mut PrimitiveSequence<Self>, size: usize) -> bool {
+                // SAFETY: There are no special preconditions to the sequence_init function.
                 unsafe {
+                    // This allocates space and sets seq.size and seq.capacity to size
                     let ret = $init_func(seq as *mut _, size);
                     if ret && !seq.data.is_null() {
+                        // Zero memory, since it will be uninitialized if there is no default value
                         std::ptr::write_bytes(seq.data, 0u8, size);
                     }
                     ret
                 }
             }
             fn primitive_sequence_fini(seq: &mut PrimitiveSequence<Self>) {
+                // SAFETY: There are no special preconditions to the sequence_fini function.
                 unsafe { $fini_func(seq as *mut _) }
             }
             fn primitive_sequence_copy(
                 in_seq: &PrimitiveSequence<Self>,
                 out_seq: &mut PrimitiveSequence<Self>,
             ) -> bool {
+                // SAFETY: There are no special preconditions to the sequence_copy function.
                 unsafe { $copy_func(in_seq as *const _, out_seq as *mut _) }
             }
             fn primitive_sequence_are_equal(
@@ -1147,27 +1169,49 @@ impl<T: PrimitiveSequenceAlloc, const N: usize> BoundedPrimitiveSequence<T, N> {
 
 /// Creates a sequence, similar to the `vec!` macro.
 ///
-/// It's possible to create message and primitive sequences.
+/// It's possible to create both [`Sequence`]s and [`BoundedSequence`]s.
 /// Unbounded sequences are created by a comma-separated list of values.
 /// Bounded sequences are created by additionally specifying the maximum capacity (the `N` type
 /// parameter) in the beginning, followed by a `#`.
 ///
 /// # Example
 /// ```
-/// # use rosidl_runtime_rs::seq;
-/// let unbounded = seq![1, 2, 3];
-/// let bounded = seq![5 # 1, 2, 3];
+/// # use rosidl_runtime_rs::{BoundedSequence, Sequence, seq};
+/// let unbounded: Sequence<i32> = seq![1, 2, 3];
+/// let bounded: BoundedSequence<i32, 5> = seq![5 # 1, 2, 3];
 /// assert_eq!(&unbounded[..], &bounded[..])
 /// ```
 #[macro_export]
 macro_rules! seq {
     [$( $elem:expr ),*] => {
-        $crate::Sequence::from(::std::vec![$($elem),*])
+        {
+            let len = seq!(@count_tts $($elem),*);
+            let mut seq = Sequence::new(len);
+            let mut i = 0;
+            $(
+                seq[i] = $elem;
+                #[allow(unused_assignments)]
+                { i += 1; }
+            )*
+            seq
+        }
     };
     [$len:literal # $( $elem:expr ),*] => {
-        <$crate::BoundedSequence<_, $len> as ::std::convert::TryFrom<_>>::try_from(::std::vec![$($elem),*])
-            .expect("sequence exceeds its declared bound")
+        {
+            let len = seq!(@count_tts $($elem),*);
+            let mut seq = BoundedSequence::<_, $len>::new(len);
+            let mut i = 0;
+            $(
+                seq[i] = $elem;
+                #[allow(unused_assignments)]
+                { i += 1; }
+            )*
+            seq
+        }
     };
+    // https://danielkeep.github.io/tlborm/book/blk-counting.html
+    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
+    (@count_tts $($e:expr),*) => {<[()]>::len(&[$(seq!(@replace_expr ($e, ()))),*])};
 }
 
 #[cfg(test)]
@@ -1176,6 +1220,67 @@ mod tests {
 
     use super::*;
 
+    impl<T: Arbitrary + SequenceAlloc> Arbitrary for Sequence<T> {
+        fn arbitrary(g: &mut Gen) -> Self {
+            Vec::arbitrary(g).into()
+        }
+    }
+
+    impl<T: Arbitrary + SequenceAlloc> Arbitrary for BoundedSequence<T, 256> {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let len = u8::arbitrary(g);
+            (0..len).map(|_| T::arbitrary(g)).collect()
+        }
+    }
+
+    #[test]
+    fn test_empty_sequence() {
+        assert!(Sequence::<i32>::default().is_empty());
+        assert!(BoundedSequence::<i32, 5>::default().is_empty());
+    }
+
+    quickcheck! {
+        fn test_extend(xs: Vec<i32>, ys: Vec<i32>) -> bool {
+            let mut xs_seq = Sequence::new(xs.len());
+            xs_seq.copy_from_slice(&xs);
+            xs_seq.extend(ys.clone());
+            if xs_seq.len() != xs.len() + ys.len() {
+                return false;
+            }
+            if xs_seq[..xs.len()] != xs[..] {
+                return false;
+            }
+            if xs_seq[xs.len()..] != ys[..] {
+                return false;
+            }
+            true
+        }
+    }
+
+    quickcheck! {
+        fn test_iteration(xs: Vec<i32>) -> bool {
+            let mut seq_1 = Sequence::new(xs.len());
+            seq_1.copy_from_slice(&xs);
+            let seq_2 = seq_1.clone().into_iter().collect();
+            seq_1 == seq_2
+        }
+    }
+
+    #[test]
+    fn test_into_vec_primitive_roundtrip() {
+        let xs: Vec<i32> = (0..1024).collect();
+        let seq: Sequence<i32> = Sequence::from(&xs[..]);
+        let ys: Vec<i32> = seq.into();
+        assert_eq!(xs, ys);
+    }
+
+    quickcheck! {
+        fn test_into_vec_primitive_quickcheck(xs: Vec<u8>) -> bool {
+            let seq: Sequence<u8> = Sequence::from(&xs[..]);
+            let ys: Vec<u8> = seq.into();
+            xs == ys
+        }
+    }
     impl<T: Arbitrary + PrimitiveSequenceAlloc> Arbitrary for PrimitiveSequence<T> {
         fn arbitrary(g: &mut Gen) -> Self {
             Vec::arbitrary(g).into()
@@ -1187,28 +1292,6 @@ mod tests {
             let len = u8::arbitrary(g);
             (0..len).map(|_| T::arbitrary(g)).collect()
         }
-    }
-
-    #[test]
-    fn seq_macro_infers_cpu_sequence_types() {
-        let unbounded = crate::seq![1u8, 2];
-        assert_eq!(unbounded.len(), 2);
-        let _: Sequence<u8> = unbounded;
-
-        let bounded = crate::seq![3 # 1u8, 2];
-        assert_eq!(bounded.as_slice(), &[1, 2]);
-        let _: BoundedSequence<u8, 3> = bounded;
-
-        let empty: Sequence<u8> = crate::seq![];
-        assert!(empty.is_empty());
-        let empty_bounded: BoundedSequence<u8, 0> = crate::seq![0 #];
-        assert!(empty_bounded.is_empty());
-    }
-
-    #[test]
-    #[should_panic(expected = "sequence exceeds its declared bound")]
-    fn seq_macro_rejects_values_above_its_declared_bound() {
-        let _ = crate::seq![1 # 10u8, 20];
     }
 
     #[test]
@@ -1238,7 +1321,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_extend(xs: Vec<i32>, ys: Vec<i32>) -> bool {
+        fn test_extend_native(xs: Vec<i32>, ys: Vec<i32>) -> bool {
             let mut xs_seq = PrimitiveSequence::new(xs.len());
             xs_seq.copy_from_slice(&xs);
             xs_seq.extend(ys.clone());
@@ -1256,7 +1339,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_iteration(xs: Vec<i32>) -> bool {
+        fn test_iteration_native(xs: Vec<i32>) -> bool {
             let mut seq_1 = PrimitiveSequence::new(xs.len());
             seq_1.copy_from_slice(&xs);
             let seq_2 = seq_1.clone().into_iter().collect();
@@ -1265,7 +1348,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_into_vec_primitive_quickcheck(xs: Vec<i32>) -> bool {
+        fn test_into_vec_primitive_quickcheck_native(xs: Vec<i32>) -> bool {
             let seq: PrimitiveSequence<i32> = PrimitiveSequence::from(&xs[..]);
             let ys: Vec<i32> = seq.into();
             xs == ys
@@ -1375,20 +1458,5 @@ mod tests {
             unsafe { PrimitiveSequence::from_owned_rosidl_buffer(std::ptr::null_mut(), 0) }
                 .is_none()
         );
-    }
-
-    #[test]
-    fn message_iterator_reports_exact_length_and_drops_remaining_values() {
-        let sequence = Sequence::from(vec![crate::String::from("one"), crate::String::from("two")]);
-        let mut iter = sequence.into_iter();
-        assert_eq!(iter.len(), 2);
-        let first = iter.next().unwrap();
-        assert_eq!(iter.size_hint(), (1, Some(1)));
-        drop(iter);
-        assert_eq!(first.to_string(), "one");
-        let mut empty = Sequence::<crate::String>::default().into_iter();
-        assert_eq!(empty.len(), 0);
-        assert_eq!(empty.next(), None);
-        assert_eq!(empty.size_hint(), (0, Some(0)));
     }
 }

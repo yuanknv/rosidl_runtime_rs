@@ -262,6 +262,8 @@ macro_rules! string_impl {
         unsafe impl Sync for $string {}
 
         impl SequenceAlloc for $string {
+            type SequenceMetadata = crate::NativeSequenceMetadata;
+
             fn sequence_init(seq: &mut Sequence<Self>, size: usize) -> bool {
                 // SAFETY: There are no special preconditions to the sequence_init function.
                 unsafe { $sequence_init(seq as *mut _, size) }
@@ -388,6 +390,8 @@ impl<const N: usize> Display for BoundedString<N> {
 }
 
 impl<const N: usize> SequenceAlloc for BoundedString<N> {
+    type SequenceMetadata = <String as SequenceAlloc>::SequenceMetadata;
+
     fn sequence_init(seq: &mut Sequence<Self>, size: usize) -> bool {
         // SAFETY: There are no special preconditions to the rosidl_runtime_c__String__Sequence__init function.
         unsafe {
@@ -454,6 +458,8 @@ impl<const N: usize> Display for BoundedWString<N> {
 }
 
 impl<const N: usize> SequenceAlloc for BoundedWString<N> {
+    type SequenceMetadata = <WString as SequenceAlloc>::SequenceMetadata;
+
     fn sequence_init(seq: &mut Sequence<Self>, size: usize) -> bool {
         // SAFETY: There are no special preconditions to the rosidl_runtime_c__U16String__Sequence__init function.
         unsafe {

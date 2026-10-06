@@ -30,6 +30,22 @@ pub use {BoundedSequence as BoundedPrimitiveSequence, Sequence as PrimitiveSeque
 #[cfg(not(feature = "rosidl-buffer"))]
 pub type BufferError = std::convert::Infallible;
 
+// Generated sources may be included by ros-env without their Cargo manifests.
+// Select buffer-only items using this runtime's feature, not the including crate's.
+#[cfg(feature = "rosidl-buffer")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! cfg_buffer {
+    ($($item:item)*) => { $($item)* };
+}
+
+#[cfg(not(feature = "rosidl-buffer"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! cfg_buffer {
+    ($($item:item)*) => {};
+}
+
 // String sequences inherit this layout from the installed C primitive-sequence macro.
 #[cfg(rosidl_buffer_abi)]
 #[doc(hidden)]

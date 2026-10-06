@@ -13,6 +13,8 @@ representations retain CPU fields. `Buffer::as_slice()` borrows CPU storage;
 accelerator fields on the CPU before serialization.
 
 Buffer-enabled generated crates select the `rosidl-buffer` Cargo feature.
+When using generated interfaces through `ros-env`, enable `rclrs/rosidl-buffer`
+to expose their buffer representations; CPU representations work without it.
 Without it, the runtime uses CPU sequences and does not link `rosidl_buffer`.
 Native sequence layouts are selected from the installed C headers; enabling
 `rosidl-buffer` against a legacy ABI is rejected at build time.

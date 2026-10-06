@@ -16,6 +16,10 @@ pub use string::{BoundedString, BoundedWString, String, StringExceedsBoundsError
 mod traits;
 pub use traits::*;
 
+/// Whether this runtime can convert native backend storage to CPU messages.
+#[doc(hidden)]
+pub const BUFFER_SUPPORT_ENABLED: bool = cfg!(feature = "rosidl-buffer");
+
 #[cfg(feature = "rosidl-buffer")]
 #[doc(hidden)]
 pub use rosidl_buffer_rs::native;

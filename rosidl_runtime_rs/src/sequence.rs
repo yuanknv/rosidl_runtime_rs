@@ -11,17 +11,21 @@ mod serde;
 
 use crate::traits::SequenceAlloc;
 #[cfg(feature = "rosidl-buffer")]
-use crate::{PrimitiveSequence, PrimitiveSequenceAlloc, SequenceExceedsBoundsError};
+use crate::SequenceExceedsBoundsError;
+#[cfg(feature = "rosidl-buffer")]
+mod buffer;
 
 /// An unbounded sequence.
 ///
-/// For message and string elements, the layout matches the corresponding native
-/// sequence. With buffer support enabled, primitive CPU sequences use the
-/// three-field layout; native transport fields use [`crate::PrimitiveSequence`]. For instance,
+/// The layout matches the corresponding native sequence, including buffer flags
+/// when present in the installed C ABI. For instance,
 /// `rosidl_runtime_rs::Sequence<rosidl_runtime_rs::String>` is the same
 /// as `rosidl_runtime_c__String__Sequence`. See the [`Message`](crate::Message) trait for background
 /// information on this topic.
 ///
+/// Opaque backend storage supports length queries, cloning, and equality when
+/// buffer support is enabled. Slice-based operations require CPU storage and
+/// panic for opaque storage; use explicit host conversion or a backend handle.
 ///
 /// # Example
 ///
@@ -50,9 +54,7 @@ pub struct Sequence<T: SequenceAlloc> {
 
 /// A bounded sequence.
 ///
-/// Message and string elements use the corresponding native sequence layout.
-/// With buffer support enabled, primitive CPU sequences retain the three-field
-/// layout; native fields use [`crate::BoundedPrimitiveSequence`]. For instance,
+/// The layout matches the corresponding native sequence. For instance,
 /// `rosidl_runtime_rs::BoundedSequence<rosidl_runtime_rs::String, 5>`
 /// is the same as `rosidl_runtime_c__String__Sequence`, which also represents both bounded
 /// sequences.  See the [`Message`](crate::Message) trait for background information on this
@@ -101,7 +103,14 @@ impl<T: SequenceAlloc> Clone for Sequence<T> {
 
 impl<T: Debug + SequenceAlloc> Debug for Sequence<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        self.as_slice().fmt(f)
+        if self.is_rosidl_buffer() {
+            f.debug_struct("Sequence")
+                .field("len", &self.size)
+                .field("is_rosidl_buffer", &true)
+                .finish()
+        } else {
+            self.as_slice().fmt(f)
+        }
     }
 }
 
@@ -142,6 +151,7 @@ impl<T: SequenceAlloc> Extend<T> for Sequence<T> {
     where
         I: IntoIterator<Item = T>,
     {
+        self.assert_cpu();
         let it = iter.into_iter();
         // The index in the sequence where the next element will be stored
         let mut cur_idx = self.size;
@@ -228,6 +238,7 @@ impl<T: SequenceAlloc> IntoIterator for Sequence<T> {
     type Item = T;
     type IntoIter = SequenceIterator<T>;
     fn into_iter(self) -> Self::IntoIter {
+        self.assert_cpu();
         SequenceIterator { seq: self, idx: 0 }
     }
 }
@@ -240,7 +251,7 @@ impl<T: SequenceAlloc + Ord> Ord for Sequence<T> {
 
 impl<T: SequenceAlloc + PartialEq> PartialEq for Sequence<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.as_slice().eq(other.as_slice())
+        T::sequence_are_equal(self, other).unwrap_or_else(|| self.as_slice().eq(other.as_slice()))
     }
 }
 
@@ -268,10 +279,33 @@ where
         seq
     }
 
+    /// Number of elements, without accessing their storage.
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    /// Whether the sequence contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
+    /// Whether the native sequence stores an opaque backend object.
+    pub fn is_rosidl_buffer(&self) -> bool {
+        T::sequence_is_rosidl_buffer(self)
+    }
+
+    fn assert_cpu(&self) {
+        assert!(
+            !self.is_rosidl_buffer(),
+            "opaque buffer storage cannot be accessed as a CPU slice"
+        );
+    }
+
     /// Extracts a slice containing the entire sequence.
     ///
-    /// Equivalent to `&seq[..]`.
+    /// Equivalent to `&seq[..]`. Panics for opaque backend storage.
     pub fn as_slice(&self) -> &[T] {
+        self.assert_cpu();
         if self.data.is_null() {
             &[]
         } else {
@@ -283,8 +317,9 @@ where
 
     /// Extracts a mutable slice containing the entire sequence.
     ///
-    /// Equivalent to `&mut seq[..]`.
+    /// Equivalent to `&mut seq[..]`. Panics for opaque backend storage.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self.assert_cpu();
         if self.data.is_null() {
             &mut []
         } else {
@@ -299,7 +334,7 @@ where
 
 impl<T: Debug + SequenceAlloc, const N: usize> Debug for BoundedSequence<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        self.as_slice().fmt(f)
+        self.inner.fmt(f)
     }
 }
 
@@ -391,6 +426,7 @@ impl<T: SequenceAlloc, const N: usize> IntoIterator for BoundedSequence<T, N> {
     type Item = T;
     type IntoIter = SequenceIterator<T>;
     fn into_iter(mut self) -> Self::IntoIter {
+        self.inner.assert_cpu();
         let seq = std::mem::replace(
             &mut self.inner,
             Sequence {
@@ -412,7 +448,7 @@ impl<T: SequenceAlloc + Ord, const N: usize> Ord for BoundedSequence<T, N> {
 
 impl<T: SequenceAlloc + PartialEq, const N: usize> PartialEq for BoundedSequence<T, N> {
     fn eq(&self, other: &Self) -> bool {
-        self.as_slice().eq(other.as_slice())
+        self.inner.eq(&other.inner)
     }
 }
 
@@ -426,6 +462,21 @@ impl<T, const N: usize> BoundedSequence<T, N>
 where
     T: SequenceAlloc,
 {
+    /// Number of elements, without accessing their storage.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Whether the sequence contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Whether the sequence stores an opaque backend object.
+    pub fn is_rosidl_buffer(&self) -> bool {
+        self.inner.is_rosidl_buffer()
+    }
+
     /// Creates a sequence of `len` elements with default values.
     ///
     /// If `len` is greater than `N`, this function panics.
@@ -498,55 +549,6 @@ impl<T: SequenceAlloc> ExactSizeIterator for SequenceIterator<T> {
 }
 
 impl<T: SequenceAlloc> FusedIterator for SequenceIterator<T> {}
-
-#[cfg(feature = "rosidl-buffer")]
-macro_rules! impl_cpu_sequence_alloc {
-    ($($ty:ty),+ $(,)?) => {$(
-        impl SequenceAlloc for $ty {
-            type SequenceMetadata = ();
-
-            fn sequence_init(seq: &mut Sequence<Self>, size: usize) -> bool {
-                let mut native = PrimitiveSequence::<Self>::default();
-                if !Self::primitive_sequence_init(&mut native, size) {
-                    return false;
-                }
-                let (data, size, capacity) = native
-                    .into_cpu_raw_parts()
-                    .expect("primitive sequence initialization creates CPU storage");
-                let replacement = Sequence {
-                    data,
-                    size,
-                    capacity,
-                    metadata: std::mem::MaybeUninit::zeroed(),
-                };
-                *seq = replacement;
-                true
-            }
-            fn sequence_fini(seq: &mut Sequence<Self>) {
-                // SAFETY: these parts belong to this C-allocated CPU sequence.
-                let native = unsafe {
-                    PrimitiveSequence::<Self>::from_cpu_raw_parts(seq.data, seq.size, seq.capacity)
-                };
-                seq.data = std::ptr::null_mut();
-                seq.size = 0;
-                seq.capacity = 0;
-                drop(native);
-            }
-            fn sequence_copy(input: &Sequence<Self>, output: &mut Sequence<Self>) -> bool {
-                let mut replacement = Sequence::<Self>::default();
-                if !Self::sequence_init(&mut replacement, input.len()) {
-                    return false;
-                }
-                replacement.as_mut_slice().copy_from_slice(input.as_slice());
-                *output = replacement;
-                true
-            }
-        }
-    )+};
-}
-
-#[cfg(feature = "rosidl-buffer")]
-impl_cpu_sequence_alloc!(bool, u8, i8, u16, i16, u32, i32, u64, i64, f32, f64);
 
 /// Creates a sequence, similar to the `vec!` macro.
 ///
@@ -677,6 +679,18 @@ mod tests {
         let bounded: BoundedSequence<u8, 4> = vec![1, 2].try_into().unwrap();
         assert_eq!(bounded.as_slice(), &[1, 2]);
     }
+
+    #[cfg(all(rosidl_buffer_abi, not(feature = "rosidl-buffer")))]
+    #[test]
+    fn opaque_flag_blocks_cpu_access_without_buffer_support() {
+        let mut sequence = Sequence::<u8>::new(0);
+        sequence.metadata = std::mem::MaybeUninit::new([true, false]);
+        let result = std::panic::catch_unwind(|| {
+            sequence.as_slice();
+        });
+        sequence.metadata = std::mem::MaybeUninit::zeroed();
+        assert!(result.is_err());
+    }
 }
 
 #[cfg(not(feature = "rosidl-buffer"))]
@@ -719,6 +733,20 @@ mod cpu {
 
             impl SequenceAlloc for $rust_type {
                 type SequenceMetadata = crate::NativeSequenceMetadata;
+
+                fn sequence_is_rosidl_buffer(seq: &Sequence<Self>) -> bool {
+                    #[cfg(rosidl_buffer_abi)]
+                    // SAFETY: native primitive init/deserialization initializes both flags.
+                    // String sequences use a different implementation and never read them.
+                    unsafe {
+                        seq.metadata.assume_init_ref()[0]
+                    }
+                    #[cfg(not(rosidl_buffer_abi))]
+                    {
+                        let _ = seq;
+                        false
+                    }
+                }
                 fn sequence_init(seq: &mut Sequence<Self>, size: usize) -> bool {
                     // SAFETY: There are no special preconditions to the sequence_init function.
                     unsafe {

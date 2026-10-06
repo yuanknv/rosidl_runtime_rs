@@ -18,6 +18,15 @@ impl<T: Serialize + SequenceAlloc> Serialize for Sequence<T> {
     where
         S: Serializer,
     {
+        #[cfg(feature = "rosidl-buffer")]
+        if let Some(cpu) = T::sequence_to_cpu(self).map_err(serde::ser::Error::custom)? {
+            return cpu.serialize(serializer);
+        }
+        if self.is_rosidl_buffer() {
+            return Err(serde::ser::Error::custom(
+                "serializing opaque storage requires rosidl-buffer",
+            ));
+        }
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for element in self.iter() {
             seq.serialize_element(element)?;

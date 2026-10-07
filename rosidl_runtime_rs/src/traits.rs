@@ -82,7 +82,7 @@ pub trait RmwMessage: Clone + Debug + Default + Send + Sync + Message {
 ///
 /// Legacy installations generate only CPU and native transport representations.
 /// All representations share the same [`Self::RmwMsg`] and ROS type support.
-/// Buffer messages use `Buffer` for primitive sequences and can retain
+/// Buffer messages use `Buffer` for unbounded `uint8` sequences and can retain
 /// accelerator storage. [`Self::try_from_rmw_message`] reports host-copy errors
 /// when a CPU representation receives accelerator storage.
 ///

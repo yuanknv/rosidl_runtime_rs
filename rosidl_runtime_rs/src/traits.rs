@@ -75,10 +75,11 @@ pub trait RmwMessage: Clone + Debug + Default + Send + Sync + Message {
 
 /// Trait for types that can be used in a `rclrs::Subscription` and a `rclrs::Publisher`.
 ///
-/// With buffer-enabled native headers, `rosidl_generator_rs` generates:
-/// - CPU messages in `${package_name}::msg`.
-/// - Backend-neutral messages in `${package_name}::msg::buffer`.
-/// - Native transport messages in `${package_name}::msg::rmw`.
+/// `rosidl_generator_rs` generates the following types of messages that implement this trait:
+/// - An "idiomatic" message type, in the `${package_name}::msg` module
+/// - An "RMW-native" message type, in the `${package_name}::msg::rmw` module
+/// - With buffer-enabled native headers, a backend-neutral message type in
+///   `${package_name}::msg::buffer`
 ///
 /// Legacy installations generate only CPU and native transport representations.
 /// All representations share the same [`Self::RmwMsg`] and ROS type support.

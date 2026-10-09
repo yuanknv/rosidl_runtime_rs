@@ -11,8 +11,6 @@ mod serde;
 
 use crate::traits::SequenceAlloc;
 #[cfg(feature = "rosidl-buffer")]
-use crate::SequenceExceedsBoundsError;
-#[cfg(feature = "rosidl-buffer")]
 mod buffer;
 
 /// An unbounded sequence.
@@ -84,7 +82,6 @@ pub struct BoundedSequence<T: SequenceAlloc, const N: usize> {
 }
 
 /// Error type for [`BoundedSequence::try_new()`].
-#[cfg(not(feature = "rosidl-buffer"))]
 #[derive(Debug)]
 pub struct SequenceExceedsBoundsError {
     /// The actual length the sequence would have after the operation.
@@ -563,7 +560,6 @@ impl<T: SequenceAlloc> FusedIterator for SequenceIterator<T> {}
 
 // ========================= impl for StringExceedsBoundsError =========================
 
-#[cfg(not(feature = "rosidl-buffer"))]
 impl std::fmt::Display for SequenceExceedsBoundsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
@@ -574,12 +570,10 @@ impl std::fmt::Display for SequenceExceedsBoundsError {
     }
 }
 
-#[cfg(not(feature = "rosidl-buffer"))]
 impl std::error::Error for SequenceExceedsBoundsError {}
 
 macro_rules! impl_sequence_alloc_for_primitive_type {
-    ($rust_type:ty, $init_func:ident, $fini_func:ident, $copy_func:ident) => {
-        #[cfg(not(feature = "rosidl-buffer"))]
+    ($rust_type:ty, $init_func:ident, $fini_func:ident, $copy_func:ident $(; native($copy_native:path, $equal_native:path, $cpu_native:path))?) => {
         #[link(name = "rosidl_runtime_c")]
         unsafe extern "C" {
             fn $init_func(seq: *mut Sequence<$rust_type>, size: usize) -> bool;
@@ -590,7 +584,6 @@ macro_rules! impl_sequence_alloc_for_primitive_type {
             ) -> bool;
         }
 
-        #[cfg(not(feature = "rosidl-buffer"))]
         impl SequenceAlloc for $rust_type {
             type SequenceMetadata = crate::NativeSequenceMetadata;
 
@@ -624,9 +617,23 @@ macro_rules! impl_sequence_alloc_for_primitive_type {
                 unsafe { $fini_func(seq as *mut _) }
             }
             fn sequence_copy(in_seq: &Sequence<Self>, out_seq: &mut Sequence<Self>) -> bool {
+                $(
+                    #[cfg(feature = "rosidl-buffer")]
+                    if let Some(result) = $copy_native(in_seq, out_seq) { return result; }
+                )?
                 // SAFETY: There are no special preconditions to the sequence_copy function.
                 unsafe { $copy_func(in_seq as *const _, out_seq as *mut _) }
             }
+            $(
+                #[cfg(feature = "rosidl-buffer")]
+                fn sequence_are_equal(lhs: &Sequence<Self>, rhs: &Sequence<Self>) -> Option<bool> {
+                    $equal_native(lhs, rhs)
+                }
+                #[cfg(feature = "rosidl-buffer")]
+                fn sequence_to_cpu(seq: &Sequence<Self>) -> Result<Option<Sequence<Self>>, crate::BufferError> {
+                    $cpu_native(seq)
+                }
+            )?
         }
     };
 }
@@ -657,7 +664,8 @@ impl_sequence_alloc_for_primitive_type!(
     u8,
     rosidl_runtime_c__uint8__Sequence__init,
     rosidl_runtime_c__uint8__Sequence__fini,
-    rosidl_runtime_c__uint8__Sequence__copy
+    rosidl_runtime_c__uint8__Sequence__copy;
+    native(buffer::copy_sequence, buffer::sequences_equal, buffer::sequence_to_cpu)
 );
 impl_sequence_alloc_for_primitive_type!(
     i8,

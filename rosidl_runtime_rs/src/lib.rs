@@ -4,11 +4,8 @@
 #[macro_use]
 mod sequence;
 #[cfg(feature = "rosidl-buffer")]
-pub use rosidl_buffer_rs::{
-    BoundedBuffer, BoundedPrimitiveSequence, BoundedVec, Buffer, BufferError, PrimitiveSequence,
-    PrimitiveSequenceAlloc, SequenceExceedsBoundsError,
-};
-pub use sequence::{BoundedSequence, Sequence};
+pub use native::BufferError;
+pub use sequence::{BoundedSequence, Sequence, SequenceExceedsBoundsError};
 
 mod string;
 pub use string::{BoundedString, BoundedWString, String, StringExceedsBoundsError, WString};
@@ -22,13 +19,9 @@ pub const BUFFER_SUPPORT_ENABLED: bool = cfg!(feature = "rosidl-buffer");
 
 #[cfg(feature = "rosidl-buffer")]
 #[doc(hidden)]
-pub use rosidl_buffer_rs::native;
+pub mod native;
 
-#[cfg(not(feature = "rosidl-buffer"))]
-pub use sequence::SequenceExceedsBoundsError;
-#[cfg(not(feature = "rosidl-buffer"))]
 pub use SequenceAlloc as PrimitiveSequenceAlloc;
-#[cfg(not(feature = "rosidl-buffer"))]
 pub use {BoundedSequence as BoundedPrimitiveSequence, Sequence as PrimitiveSequence};
 /// CPU-only conversions cannot produce backend transfer errors.
 #[cfg(not(feature = "rosidl-buffer"))]
